@@ -1,2 +1,3 @@
 b2sdk
 python-dotenv
+mcrcon
