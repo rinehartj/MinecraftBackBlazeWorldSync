@@ -7,6 +7,3 @@ This script backs up to the cloud provider Backblaze. A (private) bucket needs t
 Minecraft RCON needs to be enabled on the server for this script to work correctly, because commands `save-off`, `save-all flush`, and `save-on` are issued by the server to prevent corruption during folder zipping.
 
 To set up Python virtual environment, Python must be installed and accessible via command prompt.
-1. `python -m venv venv`
-2. `.\venv\Scripts\activate` for PowerShell
-3. `pip install -r requirements.txt`

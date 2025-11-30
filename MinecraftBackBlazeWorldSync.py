@@ -19,29 +19,12 @@ RCON_PORT = int(os.getenv("RCON_PORT", 25575))
 RCON_PASSWORD = os.getenv("RCON_PASSWORD")
 
 BACKUP_DIR = Path(__file__).parent / "backups"
-BACKUP_TAGS = ["daily", "weekly", "monthly", "6month", "yearly", "2year"]
 
 # Initialize B2
 info = InMemoryAccountInfo()
 b2_api = B2Api(info)
 b2_api.authorize_account("production", B2_KEY_ID, B2_APP_KEY)
 bucket = b2_api.get_bucket_by_name(B2_BUCKET_NAME)
-
-def get_backup_tag():
-    today = datetime.date.today()
-    weekday = today.weekday()
-    day = today.day
-    month = today.month
-    year = today.year
-
-    return {
-        0: "daily",
-        1: "weekly" if weekday == 6 else "daily",  # Sunday
-        2: "monthly" if day <= 7 else "daily",
-        3: "6month" if month in (1, 7) and day <= 7 else "daily",
-        4: "yearly" if month == 1 and day <= 7 else "daily",
-        5: "2year" if year % 2 == 0 and month == 1 and day <= 7 else "daily"
-    }[min(5, len(BACKUP_TAGS)-1)]
 
 def rcon_backup_prepare():
     print("[INFO] Connecting to RCON to freeze world saves...")
@@ -77,29 +60,45 @@ def zip_worlds():
                         zipf.write(file_path, arcname)
     return archive_path
 
-def upload_backup(archive_path, tag):
-    print(f"[INFO] Uploading to B2 with tag '{tag}'...")
-    for file_version, _ in bucket.ls():
-        if file_version.file_name.startswith(f"{tag}_"):
-            print(f"[INFO] Deleting old backup: {file_version.file_name}")
-            bucket.delete_file_version(file_version.id_, file_version.file_name)
-
-    file_name = f"{tag}_{archive_path.name}"
-    bucket.upload_local_file(local_file=archive_path, file_name=file_name)
+def upload_and_cleanup(archive_path):
+    """Upload new backup to B2, verify it exists, then delete old backups"""
+    file_name = f"mc_backup_{archive_path.name}"
+    
+    print(f"[INFO] Uploading to B2: {file_name}")
+    bucket.upload_local_file(local_file=str(archive_path), file_name=file_name)
     print(f"[SUCCESS] Uploaded: {file_name}")
-
-def cleanup_local_backups():
-    backups = sorted(BACKUP_DIR.glob("mc_backup_*.zip"), key=os.path.getmtime)
-    while len(backups) > 10:
-        old = backups.pop(0)
-        print(f"[INFO] Deleting old local backup: {old.name}")
-        old.unlink()
+    
+    # Verify the new file exists in B2
+    print("[INFO] Verifying upload...")
+    new_file_exists = False
+    for file_version, _ in bucket.ls():
+        if file_version.file_name == file_name:
+            new_file_exists = True
+            print(f"[SUCCESS] Verified new backup exists in B2: {file_name}")
+            break
+    
+    if not new_file_exists:
+        print("[ERROR] Failed to verify new backup in B2. Keeping old backups as safety measure.")
+        return
+    
+    # Delete all old cloud backups (except the one we just uploaded)
+    print("[INFO] Deleting old cloud backups...")
+    for file_version, _ in bucket.ls():
+        if file_version.file_name.startswith("mc_backup_") and file_version.file_name != file_name:
+            print(f"[INFO] Deleting old cloud backup: {file_version.file_name}")
+            bucket.delete_file_version(file_version.id_, file_version.file_name)
+    
+    # Delete all local backups except the one we just created
+    print("[INFO] Cleaning up local backups...")
+    for backup_file in BACKUP_DIR.glob("mc_backup_*.zip"):
+        if backup_file != archive_path:
+            print(f"[INFO] Deleting old local backup: {backup_file.name}")
+            backup_file.unlink()
 
 def main():
     print("[START] Minecraft Backup Script Running...")
 
     BACKUP_DIR.mkdir(exist_ok=True)
-    tag = get_backup_tag()
 
     try:
         rcon_backup_prepare()
@@ -107,8 +106,7 @@ def main():
     finally:
         rcon_backup_complete()
 
-    upload_backup(archive_path, tag)
-    cleanup_local_backups()
+    upload_and_cleanup(archive_path)
     print("[DONE] Backup complete.")
 
 if __name__ == "__main__":
