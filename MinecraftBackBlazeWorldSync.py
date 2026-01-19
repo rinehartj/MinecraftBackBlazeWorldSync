@@ -62,7 +62,7 @@ def zip_worlds():
 
 def upload_and_cleanup(archive_path):
     """Upload new backup to B2, verify it exists, then delete old backups"""
-    file_name = f"mc_backup_{archive_path.name}"
+    file_name = f"{archive_path.name}"
     
     print(f"[INFO] Uploading to B2: {file_name}")
     bucket.upload_local_file(local_file=str(archive_path), file_name=file_name)
